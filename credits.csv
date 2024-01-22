@@ -1,0 +1,58 @@
+﻿provider,Region,Edition,ItemCredits,StoragePricePerTB
+Select,Select,Select,0,0
+AWS,AWS US East (Commercial Gov-N.VA),BusinessCritical,4,40
+AWS,AWS US East (Commercial Gov-N.VA),Enterprise,3,40
+AWS,AWS US East (Commercial Gov-N.VA),Standard,2,40
+AWS,AWS US East (Commercial Gov-N.VA),Virtual Private Snowflake (VPS),1.25,40
+AWS,AWS US Gov West 1,BusinessCritical,4,40
+AWS,AWS US Gov West 1,Enterprise,3,40
+AWS,AWS US Gov West 1,Standard,2,40
+AWS,AWS US Gov West 1,Virtual Private Snowflake (VPS),1.25,40
+AWS,AWS US Gov West 1 (Fedramp High Plus),BusinessCritical,4,40
+AWS,AWS US Gov West 1 (Fedramp High Plus),Enterprise,3,40
+AWS,AWS US Gov West 1 (Fedramp High Plus),Standard,2,40
+AWS,AWS US Gov West 1 (Fedramp High Plus),Virtual Private Snowflake (VPS),1.25,40
+Azure,East US 2 (Virginia),BusinessCritical,4,40
+Azure,East US 2 (Virginia),Enterprise,3,40
+Azure,East US 2 (Virginia),Standard,2,40
+Azure,East US 2 (Virginia),Virtual Private Snowflake (VPS),1.25,40
+Azure,South Central US (Texas),BusinessCritical,4,40
+Azure,South Central US (Texas),Enterprise,3,40
+Azure,South Central US (Texas),Standard,2,40
+Azure,South Central US (Texas),Virtual Private Snowflake (VPS),1.25,40
+Azure,US Central (Iowa),BusinessCritical,4,40
+Azure,US Central (Iowa),Enterprise,3,40
+Azure,US Central (Iowa),Standard,2,40
+Azure,US Central (Iowa),Virtual Private Snowflake (VPS),1.25,40
+GCP,US Central 1 (Iowa),BusinessCritical,4,40
+GCP,US Central 1 (Iowa),Enterprise,3,40
+GCP,US Central 1 (Iowa),Standard,2,40
+GCP,US Central 1 (Iowa),Virtual Private Snowflake (VPS),1.25,40
+AWS,US East (Northern Virginia),BusinessCritical,4,40
+AWS,US East (Northern Virginia),Enterprise,3,40
+AWS,US East (Northern Virginia),Standard,2,40
+AWS,US East (Northern Virginia),Virtual Private Snowflake (VPS),1.25,40
+AWS,US East (Ohio),BusinessCritical,4,40
+AWS,US East (Ohio),Enterprise,3,40
+AWS,US East (Ohio),Standard,2,40
+AWS,US East (Ohio),Virtual Private Snowflake (VPS),1.25,40
+AWS,US East 1 Commercial Gov,BusinessCritical,4,40
+AWS,US East 1 Commercial Gov,Enterprise,3,40
+AWS,US East 1 Commercial Gov,Standard,2,40
+AWS,US East 1 Commercial Gov,Virtual Private Snowflake (VPS),1.25,40
+GCP,US East 4 (N. Virginia),BusinessCritical,4,40
+GCP,US East 4 (N. Virginia),Enterprise,3,40
+GCP,US East 4 (N. Virginia),Standard,2,40
+GCP,US East 4 (N. Virginia),Virtual Private Snowflake (VPS),1.25,40
+Azure,US Gov Virginia,BusinessCritical,4,40
+Azure,US Gov Virginia,Enterprise,3,40
+Azure,US Gov Virginia,Standard,2,40
+Azure,US Gov Virginia,Virtual Private Snowflake (VPS),1.25,40
+AWS,US West (Oregon),BusinessCritical,4,40
+AWS,US West (Oregon),Enterprise,3,40
+AWS,US West (Oregon),Standard,2,40
+AWS,US West (Oregon),Virtual Private Snowflake (VPS),1.25,40
+Azure,West US 2 (Washington),BusinessCritical,4,40
+Azure,West US 2 (Washington),Enterprise,3,40
+Azure,West US 2 (Washington),Standard,2,40
+Azure,West US 2 (Washington),Virtual Private Snowflake (VPS),1.25,40
