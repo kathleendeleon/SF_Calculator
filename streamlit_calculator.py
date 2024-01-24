@@ -126,7 +126,7 @@ col1, col2, col3 = st.columns([2,18,1])
 
 
 
-image = Image.open("deloitte_sf.PNG")
+image = Image.open("sf_3.PNG")
 st.image(image, width=600)
 
 
