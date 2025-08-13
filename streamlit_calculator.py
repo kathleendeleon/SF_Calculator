@@ -190,7 +190,7 @@ def scenario_totals(s: Scenario, a: Assumptions) -> Dict[str, float]:
 # ============================
 
 st.set_page_config(page_title="Snowflake Cost Estimator (PM)", layout="wide")
-st.title("Snowflake Cost Estimator — Scenario Planner")
+st.title("Snowflake Cost Estimator")
 st.caption("For planning purposes only. Actual pricing may vary. Uses local credits.csv & warehouse_details.csv.")
 
 credit_price_by_edition, valid_sizes, pr_df = load_reference_data()
