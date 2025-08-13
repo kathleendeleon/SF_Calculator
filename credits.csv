@@ -1,4 +1,4 @@
-﻿provider,Region,Edition,ItemCredits,StoragePricePerTB
+﻿provider,Region,Edition,Credit,StoragePricePerTB
 Select,Select,Select,0,0
 AWS,AWS US East (Commercial Gov-N.VA),BusinessCritical,4,40
 AWS,AWS US East (Commercial Gov-N.VA),Enterprise,3,40
@@ -56,3 +56,4 @@ Azure,West US 2 (Washington),BusinessCritical,4,40
 Azure,West US 2 (Washington),Enterprise,3,40
 Azure,West US 2 (Washington),Standard,2,40
 Azure,West US 2 (Washington),Virtual Private Snowflake (VPS),1.25,40
+
