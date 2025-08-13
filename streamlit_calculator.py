@@ -1,774 +1,491 @@
-# from turtle import onclick
-### https://www.snowflake.com/pricing/pricing-guide/
-import streamlit as st
+# Scenario-based Snowflake Cost Estimator for Project Managers
+# - CSV inputs: credits.csv (Edition -> $/credit), warehouse_details.csv (valid sizes)
+# - Provides Scenarios, Workload Templates, Assumptions, Results/Comparison, and Export
+
+from __future__ import annotations
+import io
+import json
+import math
+from dataclasses import dataclass, field, asdict
+from typing import Dict, List, Optional
+
 import pandas as pd
-import csv
-import datetime
-from datetime import datetime
-import time
-import os
-from PIL import Image
-from streamlit.components.v1 import html
+import streamlit as st
 
-# Constants
-#ROOT_FILE_PATH = os.path.abspath(os.path.dirname(__file__))
-#SOURCE_FILE_PATH = ROOT_FILE_PATH + "/Source"
-STORAGE_PRICE_PER_TB = 40
-CAPACITY_PRICE_PER_TB = 23
+# ============================
+# ---------- Data Layer ------
+# ============================
 
-# Variables
-page_tile = "Snowflake Cost Calculator"
-date_time = time.strftime("%Y%m%d-%H")  # format: YYYYMMDD-HH
-output_filename = "credit_calculator_" + date_time + ".csv"
+@st.cache_data(show_spinner=False)
+def load_reference_data():
+    # Required CSVs (kept from the original app)
+    credits_df = pd.read_csv("credits.csv")  # expects columns: Edition, Credit
+    warehouse_df = pd.read_csv("warehouse_details.csv")  # expects column: SIZE
 
-if 'warehouses' not in st.session_state:
-    st.session_state['warehouses'] = []
+    # Validate minimal required columns
+    if not set(["Edition", "Credit"]).issubset(credits_df.columns):
+        st.error("credits.csv must contain columns: Edition, Credit")
+    if "SIZE" not in warehouse_df.columns:
+        st.error("warehouse_details.csv must contain a column: SIZE")
 
-if 'warehouse_entries' not in st.session_state:
-    st.session_state['warehouse_entries'] = []
-
-if 'clusters' not in st.session_state:
-    st.session_state['clusters'] = []
-
-if 'cluster_entries' not in st.session_state:
-    st.session_state['cluster_entries'] = []
-
-def reset():
-    st.session_state['warehouses'] = []
-    st.session_state['warehouse_entries'] = []
-    st.session_state['clusters'] = []
-    st.session_state['cluster_entries'] = []
-    tb_per_month = 0
-
-
-# Read in source data from credits, warehouse_details files in Source folder.
-credit_data = pd.read_csv('credits.csv')
-warehouse_df = pd.read_csv('warehouse_details.csv')
-
-edition_credits = [
-    ['Business Critical', 4],
-    ['Enterprise', 3],
-    ['Standard', 2]
-    # ['Virtual Private Snowflake (VPS)', 1.25]
-]
-# item_credits = [2, 3, 4, 1.25]
-
-providers_regions = [
-    ['AWS', 'US East (Commercial Gov-N.VA)'],
-    ['AWS', 'US Gov West 1'],
-    ['AWS', 'US Gov West 1 (Fedramp High Plus)'],
-    ['Azure', 'East US 2 (Virginia)'],
-    ['Azure', 'South Central US (Texas)'],
-    ['Azure', 'US Central (Iowa)'],
-    ['GCP', 'US Central 1 (Iowa)'],
-    ['AWS', 'US East (Northern Virginia)'],
-    ['AWS', 'US East (Ohio)'],
-    ['AWS', 'US East 1 Commercial Gov'],
-    ['GCP', 'US East 4 (N. Virginia)'],
-    ['AWS', 'US West (Oregon)'],
-    ['Azure', 'US Gov Virginia'],
-    ['Azure', 'West US 2 (Washington)'],
-]
-
-df_edition_credits = pd.DataFrame(edition_credits, columns=['Edition', 'Credit'])
-df_providers_regions = pd.DataFrame(providers_regions, columns=['Provider', 'Region'])
-
-
-snowflake_warehouse_sizes = {
-    'XS': [1],
-    'S': [2],
-    'M': [4],
-    'L': [8],
-    'XL': [16],
-    '2XL': [32],
-    '3XL': [64],
-    '4XL': [128]
-}
-
-features_standard = [
-    '* Complete SQL data warehouse',
-    '* Secure Data Sharing across regions / clouds',
-    '* Premier Support 24 X 365',
-    '* 1 day of time travel',
-    '* Always-on enterprise grade encryption in transit and at rest',
-    '* Customer dedicated virtual warehouses',
-    '* Federated authentication',
-    '* Database replication',
-    '* External Functions',
-    '* Snowsight',
-    '* Create your own Data Exchange',
-    '* Data Marketplace access'
-]
-
-features_enterprise = [
-    '* Multi-cluster warehouse',
-    '* Up to 90 days of time travel',
-    '* Annual rekeying of all encrypted data',
-    '* Materialized views',
-    '* Search Optimization Service',
-    '* Dynamic Data Masking',
-    '* External Data Tokenization'
-]
-
-features_business_critical = [
-    '* HIPAA support',
-    '* PCI compliance',
-    '* Data encryption everywhere',
-    '* Tri-Secret Secure using customer-managed keys',
-    '* AWS PrivateLink support',
-    '* Azure Private Link support',
-    '* Database failover and failback for business continuity'
-]
-
-st.set_page_config(page_title=page_tile, layout="wide")
-col1, col2, col3 = st.columns([2,18,1])
-
-
-
-
-image = Image.open("sf_3.PNG")
-st.image(image, width=600)
-
-
-    
-
-                    
-if(True):
-    st.header('Edition Features')
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col1:
-        
-        st.info("Standard")
-        st.info("\n".join(sorted(features_standard)))
-    with col2:
-        st.info("Enterprise")
-        st.info("\n".join(sorted(features_enterprise)))
-    with col3:
-        st.info("Business Critical")
-        st.info("\n".join(sorted(features_business_critical)))
-  
-
-
-
-
-def local_css(file_name):
-    with open(file_name) as f:
-        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
-
-
-def remote_css(url):
-    st.markdown(f'<link href="{url}" rel="stylesheet">',
-                unsafe_allow_html=True)
-
-
-def int_to_formatted_time(input_hour):
-    format_time = datetime.strptime(str(input_hour), "%H")
-    return format_time.strftime("%H:%M%p")
-
-
-def add_warehouse_entry(
-        warehouse,
-        size,
-        hours_per_day,
-        days_per_week,
-        hours_per_year,
-        compute_credits,
-        cloud_services,
-        cloud_services_credits,
-        credit_per_hour
-):
-    if warehouse not in st.session_state['warehouses']:
-        st.session_state['warehouses'].append(warehouse)
-        st.session_state['warehouse_entries'].append(
-            [
-                warehouse,
-                size,
-                hours_per_day,
-                days_per_week,
-                hours_per_year,
-                compute_credits,
-                cloud_services,
-                cloud_services_credits,
-                credit_per_hour
-            ]
-        )
-
-
-def add_multi_cluster_entry(warehouse, size, start_time, end_time, hours_per_day, days_per_week, hours_per_year,
-                            cloud_credits, cloud_service_credits):
-    warehouse_cluster_name = (
-            str(warehouse) +
-            ': ' +
-            int_to_formatted_time(start_time) +
-            ' - ' +
-            int_to_formatted_time(end_time)
+    # Build maps
+    credit_price_by_edition = (
+        credits_df.dropna(subset=["Edition", "Credit"])  # clean
+        .groupby("Edition")["Credit"]
+        .max()  # if multiple rows per edition, take max/most conservative
+        .to_dict()
     )
 
-    if warehouse_cluster_name not in st.session_state['clusters']:
-        st.session_state['clusters'].append(warehouse_cluster_name)
-        st.session_state['cluster_entries'].append(
-            [
-                warehouse,
-                warehouse_cluster_name,
-                size,
-                hours_per_day,
-                days_per_week,
-                hours_per_year,
-                cloud_credits,
-                cloud_service_credits
-            ]
-        )
-
-
-def get_added_clusters():
-    df_clusters = pd.DataFrame(
-        st.session_state['cluster_entries'],
-        columns=[
-            'WAREHOUSE',
-            'WAREHOUSE CLUSTER',
-            'SIZE',
-            'HOURS/DAY',
-            'DAYS/WEEK',
-            'HOURS/YEAR',
-            'COMPUTE CREDITS',
-            'CLOUD SERVICES CREDITS'
-        ]
+    sizes = (
+        warehouse_df["SIZE"].dropna().astype(str).drop_duplicates().tolist()
     )
-    return df_clusters.astype({
-        "WAREHOUSE": str,
-        "WAREHOUSE CLUSTER": str,
-        "SIZE": str,
-        "HOURS/DAY": int,
-        "DAYS/WEEK": int,
-        "HOURS/YEAR": int,
-        "COMPUTE CREDITS": int,
-        'CLOUD SERVICES CREDITS': int
-    })
+
+    # Default provider/regions kept (extend as needed)
+    providers_regions = [
+        ["AWS", "US East (Commercial Gov-N.VA)"],
+        ["AWS", "US Gov West 1"],
+        ["AWS", "US Gov West 1 (Fedramp High Plus)"],
+        ["Azure", "East US 2 (Virginia)"],
+        ["Azure", "South Central US (Texas)"],
+        ["Azure", "US Central (Iowa)"],
+        ["GCP", "US Central 1 (Iowa)"],
+        ["AWS", "US East (Northern Virginia)"],
+        ["AWS", "US East (Ohio)"],
+        ["AWS", "US East 1 Commercial Gov"],
+        ["GCP", "US East 4 (N. Virginia)"],
+        ["AWS", "US West (Oregon)"],
+        ["Azure", "US Gov Virginia"],
+        ["Azure", "West US 2 (Washington)"],
+    ]
+    pr_df = pd.DataFrame(providers_regions, columns=["Provider", "Region"])  # for UI
+
+    return credit_price_by_edition, sizes, pr_df
 
 
-def get_added_warehouses():
-    df_warehouses = pd.DataFrame(
-        st.session_state['warehouse_entries'],
-        columns=[
-            'WAREHOUSE',
-            'SIZE',
-            'HOURS/DAY',
-            'DAYS/WEEK',
-            'HOURS/YEAR',
-            'COMPUTE CREDITS',
-            'CLOUD SERVICES %',
-            'CLOUD SERVICES CREDITS',
-            'CREDIT/HOUR'
-        ]
-    )
-    return df_warehouses.astype({
-        "WAREHOUSE": str,
-        "SIZE": str,
-        "HOURS/DAY": int,
-        "DAYS/WEEK": int,
-        "HOURS/YEAR": int,
-        "COMPUTE CREDITS": int,
-        "CLOUD SERVICES %": int,
-        "CLOUD SERVICES CREDITS": int,
-        "CREDIT/HOUR": int
-    })
+# ============================
+# ---------- Model ----------
+# ============================
+
+SIZE_TO_CREDITS = {"XS":1, "S":2, "M":4, "L":8, "XL":16, "2XL":32, "3XL":64, "4XL":128}
+
+@dataclass
+class Assumptions:
+    credit_price_by_edition: Dict[str, float]
+    storage_price_per_tb: float = 40.0
+    capacity_price_per_tb: float = 23.0
+    cloud_services_pct_default: float = 10.0
+    time_travel_storage_overhead_pct: float = 0.0
+    fail_safe_storage_overhead_pct: float = 0.0
+    per_second_billing: bool = True
+    min_seconds_per_query: int = 60
+
+@dataclass
+class Warehouse:
+    name: str
+    size: str  # must be present in SIZE_TO_CREDITS or provided by warehouse_details.csv
+    hours_per_day: float
+    days_per_week: int
+    auto_suspend_minutes: int = 5
+    cloud_services_pct: Optional[float] = None
+    min_clusters: int = 1
+    max_clusters: int = 1
+    concurrency_target: Optional[int] = None
+    avg_query_seconds: Optional[int] = None
+    avg_idle_minutes_per_run: int = 0
+
+    @property
+    def credits_per_hour(self) -> float:
+        # Try mapping from common size table; fallback to numeric if size looks numeric
+        if self.size in SIZE_TO_CREDITS:
+            return float(SIZE_TO_CREDITS[self.size])
+        try:
+            return float(self.size)
+        except Exception:
+            return 0.0
+
+@dataclass
+class Scenario:
+    name: str
+    edition: str
+    provider: str
+    region: str
+    tb_per_month: float
+    warehouses: List[Warehouse] = field(default_factory=list)
+    notes: str = ""
+
+# ============================
+# ------- Pricing Engine -----
+# ============================
+
+def estimate_avg_clusters(w: Warehouse) -> float:
+    if w.max_clusters <= 1:
+        return 1.0
+    if w.concurrency_target:
+        est = max(w.min_clusters, min(w.max_clusters, math.ceil(w.concurrency_target / 8)))
+        return float(est)
+    return float((w.min_clusters + w.max_clusters) / 2)
 
 
-size_df = warehouse_df['SIZE'].drop_duplicates()
+def billed_hours_per_year(w: Warehouse) -> float:
+    hours_week = w.hours_per_day * w.days_per_week
+    hours_year = hours_week * 52
+    idle_hours = (w.avg_idle_minutes_per_run / 60.0) * w.days_per_week * 52
+    return max(0.0, hours_year - idle_hours)
 
-m = st.markdown("""
-<style>
-div.stButton > button:first-child {
-    background-color: #1F618D;
-    color:#ffffff;
-}
-div.stButton > button:hover {
-    background-color: #87CEFA;
-    color:#F1C800;
+
+def compute_credits_for_warehouse(w: Warehouse) -> float:
+    billable_hours = billed_hours_per_year(w)
+    avg_clusters = estimate_avg_clusters(w)
+    return w.credits_per_hour * billable_hours * avg_clusters
+
+
+def cloud_services_credits(w: Warehouse, compute_credits: float, default_pct: float) -> float:
+    pct = w.cloud_services_pct if w.cloud_services_pct is not None else default_pct
+    return compute_credits * (pct / 100.0)
+
+
+def storage_costs(tb_per_month: float, a: Assumptions) -> Dict[str, float]:
+    raw = tb_per_month * 12.0
+    overhead = raw * (a.time_travel_storage_overhead_pct + a.fail_safe_storage_overhead_pct) / 100.0
+    total_tb_year = raw + overhead
+    return {
+        "tb_year": total_tb_year,
+        "ondemand_total": total_tb_year * a.storage_price_per_tb,
+        "capacity_total": total_tb_year * a.capacity_price_per_tb,
     }
-</style>""", unsafe_allow_html=True)
-
-with (st.sidebar):
-    # local variables
-    unique_provider = df_providers_regions['Provider'].unique()
-
-    st.header("Step 1: Select Edition")
-    st.write('Snowflake offers three different data warehouse as-a-service editions, each providing progressively more features')
-    input_edition = st.selectbox('Edition', df_edition_credits['Edition'], index=2)
-
-    st.subheader("Deployment/Cloud")
-    st.write('Select a Deployment and Cloud for the warehouses below')
-
-    deployment_cloud_columns = st.columns([1, 2])
-    with deployment_cloud_columns[0]:
-        input_provider = st.selectbox('Provider', options=unique_provider)
-    with deployment_cloud_columns[1]:
-        input_region = st.selectbox('Region', options=sorted(df_providers_regions[df_providers_regions['Provider']
-                                                                                  == input_provider]['Region']))
-        
-    st.write("                                                                                             ")
 
 
-    st.header("Step 2: Specify Storage")
-    st.write(" Snowflake provides the option to pre-purchase Capacity. The Capacity purchased is then consumed on a monthly basis")
-    # TODO: change step to float, so can increment by half a Tb?
-    tb_per_month = st.number_input("Tb/Month", min_value=0, value=0, step=1)
-    warehouse_size_table = pd.DataFrame.from_dict(snowflake_warehouse_sizes)
+def scenario_totals(s: Scenario, a: Assumptions) -> Dict[str, float]:
+    compute_total = 0.0
+    cloud_services_total = 0.0
+    for w in s.warehouses:
+        comp = compute_credits_for_warehouse(w)
+        cs = cloud_services_credits(w, comp, a.cloud_services_pct_default)
+        compute_total += comp
+        cloud_services_total += cs
+    credits_total = compute_total + cloud_services_total
+    credit_price = a.credit_price_by_edition.get(s.edition, 0.0)
+    storage = storage_costs(s.tb_per_month, a)
+    subtotal_compute_usd = credits_total * credit_price
+    grand_total_ondemand = storage["ondemand_total"] + subtotal_compute_usd
+    grand_total_capacity = storage["capacity_total"] + subtotal_compute_usd
+    return {
+        "compute_credits": compute_total,
+        "cloud_services_credits": cloud_services_total,
+        "credits_total": credits_total,
+        "credit_unit_price": credit_price,
+        "compute_usd": subtotal_compute_usd,
+        "storage_tb_year": storage["tb_year"],
+        "storage_usd_ondemand": storage["ondemand_total"],
+        "storage_usd_capacity": storage["capacity_total"],
+        "total_usd_ondemand": grand_total_ondemand,
+        "total_usd_capacity": grand_total_capacity,
+        "monthly_usd_ondemand": grand_total_ondemand / 12.0,
+        "monthly_usd_capacity": grand_total_capacity / 12.0,
+    }
 
 
+# ============================
+# ----------- UI -------------
+# ============================
+
+st.set_page_config(page_title="Snowflake Cost Estimator (PM)", layout="wide")
+st.title("Snowflake Cost Estimator — Scenario Planner")
+st.caption("For planning purposes only. Actual pricing may vary. Uses local credits.csv & warehouse_details.csv.")
+
+credit_price_by_edition, valid_sizes, pr_df = load_reference_data()
+
+# Initialize app state
+if "assumptions" not in st.session_state:
+    st.session_state.assumptions = Assumptions(credit_price_by_edition=credit_price_by_edition)
+if "scenarios" not in st.session_state:
+    st.session_state.scenarios: Dict[str, Scenario] = {}
+if "active_scenario" not in st.session_state:
+    st.session_state.active_scenario: Optional[str] = None
 
 
-    if 'data' not in st.session_state:
-        data = pd.DataFrame({'Warehouse': [], 'Size': [], 'Hrs/Day': [], 'Days/Week': []})
-        st.session_state.data = data
-    data = st.session_state.data
+# ---------- Sidebar: Build/Select Scenario ----------
+st.sidebar.header("Scenario Builder")
+with st.sidebar:
+    cols = st.columns(2)
+    with cols[0]:
+        s_name = st.text_input("Scenario name", value="Prod")
+    with cols[1]:
+        tbpm = st.number_input("TB / month", min_value=0.0, value=1.0, step=0.5)
 
-    if 'data1' not in st.session_state:
-        data1 = pd.DataFrame({'WAREHOUSE': [], 'SIZE': [], 'ESTIMATED HOURS': [], 'CREDIT/HOUR': [], 'CREDITS': []})
-        st.session_state.data1 = data1
-    data1 = st.session_state.data1
+    col2 = st.columns(2)
+    with col2[0]:
+        edition = st.selectbox("Edition", options=sorted(credit_price_by_edition.keys()))
+    with col2[1]:
+        provider = st.selectbox("Provider", options=sorted(pr_df["Provider"].unique()))
 
-
-    st.write("                                                                                             ")
- 
-
-    st.header("Step 3: Specify Compute")
-    
-
-  
-    warehouse_col, name_col= st.columns([0.5, 0.5])
-
-    with warehouse_col:
-        input_size = st.selectbox('VIRTUAL WAREHOUSE SIZE', size_df)
-
-    with name_col:
-        input_warehouse = st.text_input('WAREHOUSE NAME')
-
-
-    df_warehouse_sizes = pd.DataFrame({
-    'XS': ['1'],
-    'S': ['2'],
-    'M': ['4'],
-    'L': ['8'],
-    'XL': ['16'],
-    '2XL': ['32'],
-    '3XL': ['64'],
-    '4XL': ['128']
-
-})
-
-    
-    st.write('Snowflake Virtual Warehouse sizes and credits per hour')
-    st.dataframe(df_warehouse_sizes, hide_index=True, use_container_width=True)
-
-
- 
-
-    column_hours_per_day, column_days_per_week, column_hours_per_year = st.columns([1, 1, 1])
-    column_compute_credits, column_cloud_services, column_cloud_service_credits = st.columns([1, 1, 1])
-
-
-    with column_hours_per_day:
-        input_hours_per_day = st.number_input('HOURS/DAY', min_value=0, max_value=24, value=8)
-
-    with column_days_per_week:
-        input_days_per_week = st.number_input('DAYS/WEEK', min_value=1, max_value=7, value=5)
-
-    with column_hours_per_year:
-        input_hours_per_year = st.text_input('HOURS/YEAR', value=input_hours_per_day * input_days_per_week * 52,
-                                             disabled=True)
-
-    with column_compute_credits:
-        input_compute_credits = st.text_input('COMPUTE CREDITS',
-                                              value=int(input_hours_per_year) * snowflake_warehouse_sizes[input_size][
-                                                  0],
-                                              disabled=True)
-
-    with column_cloud_services:
-        input_cloud_services = st.number_input('CLOUD SERVICES %', min_value=1, max_value=100, value=10,
-                                               disabled=True)
-        # Remove disabled=True if we need to allow cloud services adjustments in a future iteration.
-
-    with column_cloud_service_credits:
-        input_cloud_service_credits = st.text_input('CLOUD SERVICES CREDITS',
-                                                    int(input_cloud_services * (float(input_compute_credits) / 100.0)),
-                                                    disabled=True)
-
-    all_inputs = (
-        input_warehouse,
-        input_size,
-        input_hours_per_day,
-        input_days_per_week,
-        input_hours_per_year,
-        input_compute_credits,
-        input_cloud_services,
-        input_cloud_service_credits,
-        snowflake_warehouse_sizes[input_size][0]
+    region = st.selectbox(
+        "Region",
+        options=sorted(pr_df[pr_df["Provider"] == provider]["Region"].unique()),
     )
 
-    st.button('Add Warehouse', disabled=(not input_warehouse),
-              on_click=add_warehouse_entry, args=all_inputs)
-    
-    st.write("                                                                                             ")
+    add_or_update = st.button("Add/Update Scenario")
+    if add_or_update and s_name:
+        st.session_state.scenarios[s_name] = Scenario(
+            name=s_name,
+            edition=edition,
+            provider=provider,
+            region=region,
+            tb_per_month=tbpm,
+            warehouses=st.session_state.scenarios.get(s_name, Scenario(s_name, edition, provider, region, tbpm)).warehouses,
+        )
+        st.session_state.active_scenario = s_name
 
-    if input_edition == 'Business Critical' or  input_edition ==  'Enterprise':
-
-        with st.container():
-            input_column_multi_clustered = st.checkbox('MULTI-CLUSTERED')
-
-        mc_start_time, mc_end_time = st.columns([0.75, 0.75])
-        mc_column_hours_per_day, mc_column_days_per_week, mc_column_hours_per_year = st.columns([0.75, 0.75, 0.75])
-
-        with mc_start_time:
-            input_mc_start_time = st.number_input(
-                'START TIME',
-                min_value=0,
-                max_value=24,
-                value=8,
-                step=1,
-                disabled=(not input_column_multi_clustered)
-            )
-        with mc_end_time:
-            input_mc_end_time = st.number_input(
-                'END TIME',
-                min_value=input_mc_start_time,
-                max_value=(input_mc_start_time + input_hours_per_day) or 24,
-                step=1,
-                value=input_mc_start_time + 1,
-                disabled=(not input_column_multi_clustered)
-            )
-        with mc_column_hours_per_day:
-            input_mc_hours_per_day = st.number_input(
-                'HOURS/DAY',
-                value=input_mc_end_time - input_mc_start_time,
-                disabled=True
-            )
-        with mc_column_days_per_week:
-            input_mc_days_per_week = st.number_input(
-                'DAYS/WEEK',
-                min_value=1,
-                max_value=input_days_per_week,
-                value=1,
-                step=1,
-                key=98,
-                disabled=(not input_column_multi_clustered)
-            )
-        with mc_column_hours_per_year:
-            input_mc_hours_per_year = st.text_input(
-                'HOURS/YEAR',
-                value=input_mc_hours_per_day * input_mc_days_per_week * 52,
-                key=99,
-                disabled=True
-            )
-
-        mc_cloud_compute_credits = int(input_mc_hours_per_year) * snowflake_warehouse_sizes[input_size][0]
-        mc_cloud_service_credits = int(input_cloud_services * (float(mc_cloud_compute_credits) / 100.0))
-
-        all_mc_inputs = (
-            input_warehouse,
-            input_size,
-            input_mc_start_time,
-            input_mc_end_time,
-            input_mc_hours_per_day,
-            input_mc_days_per_week,
-            input_mc_hours_per_year,
-            mc_cloud_compute_credits,
-            mc_cloud_service_credits
+    if st.session_state.scenarios:
+        st.session_state.active_scenario = st.selectbox(
+            "Active scenario",
+            options=list(st.session_state.scenarios.keys()),
+            index=list(st.session_state.scenarios.keys()).index(st.session_state.active_scenario)
+            if st.session_state.active_scenario in st.session_state.scenarios
+            else 0,
         )
 
-        st.button('Add Cluster', disabled=(not input_column_multi_clustered),
-                on_click=add_multi_cluster_entry, args=all_mc_inputs)
+    st.divider()
 
-    st.write("                                                                                             ")
+    st.subheader("Add Warehouse to Scenario")
+    w_cols = st.columns(2)
+    with w_cols[0]:
+        w_name = st.text_input("Warehouse name", value="WH_ETL")
+        size = st.selectbox("Size", options=valid_sizes)
+        days_per_week = st.number_input("Days/week", 1, 7, value=5)
+        min_clusters = st.number_input("Min clusters", 1, 99, value=1)
+        avg_idle = st.number_input("Avg idle minutes/run", 0, 240, value=0)
+    with w_cols[1]:
+        hours_per_day = st.number_input("Hours/day", 0.0, 24.0, value=8.0, step=0.5)
+        auto_suspend = st.number_input("Auto-suspend (min)", 0, 60, value=5)
+        cloud_pct = st.number_input("Cloud Services % (override)", 0, 100, value=10)
+        max_clusters = st.number_input("Max clusters", 1, 99, value=1)
+        concurrency = st.number_input("Concurrency target", 0, 1000, value=0)
 
-
-    st.header("Step 4: Estimated Usage")
-
-    with st.container():
-        if st.session_state['warehouse_entries']:
-            st.write("Warehouse Entries")
-            st.dataframe(get_added_warehouses().T, use_container_width=True)
-
-        if st.session_state['cluster_entries']:
-            st.write("Warehouse Multi-Cluster Entries")
-            st.dataframe(get_added_clusters().T, use_container_width=True)
-
-    st.button('Reset Selections', on_click=reset)
-
-st.header('Edition: ' + input_edition)
-
-
-if input_edition == 'Standard':
-    with st.expander("**Storage**", expanded=True):
-        storage = tb_per_month * 12.0
-        storage_value = storage * STORAGE_PRICE_PER_TB
-        capacity_value = storage * CAPACITY_PRICE_PER_TB
-        storage_str = '$'+ str(STORAGE_PRICE_PER_TB)
-        capacity_str = '$'+ str(CAPACITY_PRICE_PER_TB)
-        mdf = pd.DataFrame({'TB/YR': str(storage), 'ON-DEMAND STORAGE/TB': storage_str,
-                            'ON-DEMAND TOTAL': str(storage_value), 'CAPACITY STORAGE/TB': capacity_str,'CAPACITY STORAGE TOTAL' : str(capacity_value)}, index=[0])
-
-        st.dataframe(
-            mdf,
-            column_config={
-                "STORAGE PRICE PER TB": st.column_config.NumberColumn(
-                    "STORAGE PRICE PER TB",
-                    help="Storage/Per TB in USD",
-                    step=1,
-                    format="$%d",
-                ),
-                "STORAGE VALUE": st.column_config.NumberColumn(
-                    "STORAGE VALUE",
-                    help="Storage Value in USD",
-                    step=1,
-                    format="$%d",
-                ),
-            },
-            hide_index=True,
+    add_wh = st.button("Add Warehouse")
+    if add_wh and st.session_state.active_scenario:
+        sc = st.session_state.scenarios[st.session_state.active_scenario]
+        wh = Warehouse(
+            name=w_name,
+            size=str(size),
+            hours_per_day=float(hours_per_day),
+            days_per_week=int(days_per_week),
+            auto_suspend_minutes=int(auto_suspend),
+            cloud_services_pct=float(cloud_pct),
+            min_clusters=int(min_clusters),
+            max_clusters=int(max_clusters),
+            concurrency_target=int(concurrency) if concurrency > 0 else None,
+            avg_idle_minutes_per_run=int(avg_idle),
         )
-    with (st.expander("**Warehouse Credits**", expanded=True)):
-        if st.session_state['warehouse_entries']:
-            df_added_warehouses = get_added_warehouses()
+        # replace if same name exists
+        sc.warehouses = [w for w in sc.warehouses if w.name != wh.name] + [wh]
+        st.session_state.scenarios[sc.name] = sc
 
-            df_added_clusters = pd.DataFrame({'A': []})
-            if st.session_state['cluster_entries']:
-                df_added_clusters = get_added_clusters()
+    if st.session_state.active_scenario and st.session_state.active_scenario in st.session_state.scenarios:
+        sc = st.session_state.scenarios[st.session_state.active_scenario]
+        # simple removal control
+        to_remove = st.selectbox(
+            "Remove warehouse",
+            options=["(none)"] + [w.name for w in sc.warehouses],
+            index=0,
+        )
+        if to_remove != "(none)" and st.button("Confirm Remove"):
+            sc.warehouses = [w for w in sc.warehouses if w.name != to_remove]
+            st.session_state.scenarios[sc.name] = sc
 
-            if not df_added_clusters.empty:
-                select_columns_cluster_credits = df_added_clusters[
-                    ["WAREHOUSE", "COMPUTE CREDITS", "CLOUD SERVICES CREDITS"]]
-                compute_sum_cluster_credits = select_columns_cluster_credits.groupby("WAREHOUSE").sum().reset_index()
-                # Added just for testing / debugging
-                # st.write("Testing - Multi-Cluster Credits")
-                # st.write("Cluster Sum By Warehouse Name")
-                # st.write(compute_sum_cluster_credits)
+# ---------- Main Area Tabs ----------
 
-                df_new_added_warehouse = pd.concat([df_added_warehouses, compute_sum_cluster_credits]).groupby(
-                    "WAREHOUSE").sum().reset_index()
-                # st.write("New Credit Sums - Adding Cluster Contributions")
-                # st.write(df_new_added_warehouse)
-                df_added_warehouses = df_new_added_warehouse
+Tabs = st.tabs(["Inputs", "Results", "Comparison", "Assumptions", "Templates", "Export", "Glossary"])
 
-            # cloud services credit adjustment for easier sum.
-            df_added_warehouses['CSA'] = df_added_warehouses['CLOUD SERVICES CREDITS'].where(
-                df_added_warehouses['CLOUD SERVICES %'].gt(10.0),
-                -df_added_warehouses['CLOUD SERVICES CREDITS']
-            ).clip(upper=0)
+# --- Inputs Tab ---
+with Tabs[0]:
+    st.subheader("Scenario & Warehouses")
+    if not st.session_state.scenarios:
+        st.info("Create a scenario from the sidebar to begin.")
+    else:
+        sc = st.session_state.scenarios[st.session_state.active_scenario]
+        st.markdown(f"**Active scenario:** `{sc.name}` — {sc.edition}, {sc.provider}/{sc.region}, TB/mo: {sc.tb_per_month}")
+        if sc.warehouses:
+            df_wh = pd.DataFrame([asdict(w) | {"credits_per_hour": w.credits_per_hour} for w in sc.warehouses])
+            st.dataframe(df_wh, use_container_width=True, hide_index=True)
+        else:
+            st.warning("No warehouses added yet.")
 
-            select_columns_warehouse_credits = df_added_warehouses[["WAREHOUSE", "SIZE", "HOURS/YEAR", "COMPUTE CREDITS", "CREDIT/HOUR"]]
-            select_columns_warehouse_credits.rename({'HOURS/YEAR': 'ESTIMATED HOURS', 'COMPUTE CREDITS': 'CREDITS'}, axis=1,
-                                                    inplace=True
-                                                    )
+# --- Results Tab ---
+with Tabs[1]:
+    st.subheader("Scenario Results")
+    if not st.session_state.scenarios:
+        st.info("Create a scenario from the sidebar to view results.")
+    else:
+        sc = st.session_state.scenarios[st.session_state.active_scenario]
+        a = st.session_state.assumptions
+        totals = scenario_totals(sc, a)
 
-            df_warehouse_credits = select_columns_warehouse_credits[["WAREHOUSE", "SIZE", "ESTIMATED HOURS", "CREDIT/HOUR", "CREDITS"]] \
-                .astype({
-                "WAREHOUSE" : str,
-                "SIZE": str,
-                "ESTIMATED HOURS": int,
-                "CREDIT/HOUR": int,
-                "CREDITS": int
-            })
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Monthly On-Demand ($)", f"{totals['monthly_usd_ondemand']:,.2f}")
+        m2.metric("Monthly Capacity ($)", f"{totals['monthly_usd_capacity']:,.2f}")
+        m3.metric("Credits (total/yr)", f"{totals['credits_total']:,.0f}")
+        m4.metric("Storage TB/yr", f"{totals['storage_tb_year']:,.2f}")
 
-            total_cloud_services_credits = df_added_warehouses['CLOUD SERVICES CREDITS'].sum()
-            total_cloud_services_credits_adjustments = df_added_warehouses['CSA'].sum()
-            total_estimate_credits = df_added_warehouses['COMPUTE CREDITS'].sum()
-
-            df_warehouse_credits_totals = pd.DataFrame(
-                [
-                    ["Cloud Services Credits:", "", "", "",total_cloud_services_credits],
-                    ["Cloud Services Adjustments:", "", "","", total_cloud_services_credits_adjustments],
-                    ["Total Estimated Credits:", "", "","", total_cloud_services_credits +
-                    total_cloud_services_credits_adjustments +
-                    total_estimate_credits]
+        st.divider()
+        st.write("Breakdown")
+        breakdown = pd.DataFrame(
+            {
+                "Item": [
+                    "Compute credits",
+                    "Cloud Services credits",
+                    "Credit unit price",
+                    "Compute subtotal ($)",
+                    "Storage on-demand ($/yr)",
+                    "Storage capacity ($/yr)",
+                    "Total on-demand ($/yr)",
+                    "Total capacity ($/yr)",
                 ],
-                columns=[
-                    'WAREHOUSE',
-                    'SIZE',
-                    "ESTIMATED HOURS",
-                    "CREDIT/HOUR",
-                    "CREDITS"
-                ]
-            )
-
-            df_warehouse_credits.sort_values(by=['CREDIT/HOUR', 'CREDITS'], inplace=True)
-
-            st.dataframe(pd.concat([df_warehouse_credits, df_warehouse_credits_totals]), hide_index=True)
-
-    with st.expander("**Total**", expanded=True):
-        if st.session_state['warehouse_entries']:
-            item_credits = df_edition_credits[df_edition_credits['Edition'] == input_edition]['Credit']
-
-            data_df = pd.DataFrame(
-                dict(
-                    ITEM=[
-                        "Storage (" + str(storage) + " * $" + str("{:0,.2f}".format(float(STORAGE_PRICE_PER_TB))) + ")",
-                        "Proposed Credits (" + str(total_estimate_credits) + " * $" + str(
-                            "{:0,.2f}".format(float(item_credits))) + ")",
-                        "Product Capacity Total",
-                        "Capacity Total",
-                        "Total"
-                    ],
-                    SUBTOTAL=[
-                        int(storage_value),
-                        float(total_estimate_credits * item_credits),
-                        float(storage_value + (total_estimate_credits * item_credits)),
-                        float(storage_value + (total_estimate_credits * item_credits)),
-                        float(storage_value + (total_estimate_credits * item_credits))
-                    ])
-            )
-
-            st.dataframe(
-                data_df,
-                column_config={
-                    "ITEM": st.column_config.TextColumn(
-                        "ITEM",
-                        width="medium"
-                    ),
-                    "SUBTOTAL": st.column_config.NumberColumn(
-                        "SUBTOTAL",
-                        help="The price of the product in USD",
-                        width="medium",
-                        format="$%10.2f",
-                    )
-                },
-                hide_index=True,
-            )
-
-if input_edition == 'Business Critical' or  input_edition ==  'Enterprise':
-    with st.expander("**Storage**", expanded=True):
-        storage = tb_per_month * 12.0
-        storage_value = storage * STORAGE_PRICE_PER_TB
-        capacity_value = storage * CAPACITY_PRICE_PER_TB
-        storage_str = '$'+ str(STORAGE_PRICE_PER_TB)
-        capacity_str = '$'+ str(CAPACITY_PRICE_PER_TB)
-        mdf = pd.DataFrame({'TB/YR': str(storage), 'ON-DEMAND STORAGE/TB': storage_str,
-                            'ON-DEMAND TOTAL': str(storage_value), 'CAPACITY STORAGE/TB': capacity_str,'CAPACITY STORAGE TOTAL' : str(capacity_value)}, index=[0])
-
-        st.dataframe(
-            mdf,
-            column_config={
-                "STORAGE PRICE PER TB": st.column_config.NumberColumn(
-                    "STORAGE PRICE PER TB",
-                    help="Storage/Per TB in USD",
-                    step=1,
-                    format="$%d",
-                ),
-                "STORAGE VALUE": st.column_config.NumberColumn(
-                    "STORAGE VALUE",
-                    help="Storage Value in USD",
-                    step=1,
-                    format="$%d",
-                ),
-            },
-            hide_index=True,
-        )
-    with (st.expander("**Warehouse Credits**", expanded=True)):
-        if st.session_state['warehouse_entries']:
-            df_added_warehouses = get_added_warehouses()
-
-            df_added_clusters = pd.DataFrame({'A': []})
-            if st.session_state['cluster_entries']:
-                df_added_clusters = get_added_clusters()
-
-            if not df_added_clusters.empty:
-                select_columns_cluster_credits = df_added_clusters[
-                    ["WAREHOUSE", "COMPUTE CREDITS", "CLOUD SERVICES CREDITS"]]
-                compute_sum_cluster_credits = select_columns_cluster_credits.groupby("WAREHOUSE").sum().reset_index()
-                # Added just for testing / debugging
-                # st.write("Testing - Multi-Cluster Credits")
-                # st.write("Cluster Sum By Warehouse Name")
-                # st.write(compute_sum_cluster_credits)
-
-                df_new_added_warehouse = pd.concat([df_added_warehouses, compute_sum_cluster_credits]).groupby(
-                    "WAREHOUSE").sum().reset_index()
-                # st.write("New Credit Sums - Adding Cluster Contributions")
-                # st.write(df_new_added_warehouse)
-                df_added_warehouses = df_new_added_warehouse
-
-            # cloud services credit adjustment for easier sum.
-            df_added_warehouses['CSA'] = df_added_warehouses['CLOUD SERVICES CREDITS'].where(
-                df_added_warehouses['CLOUD SERVICES %'].gt(10.0),
-                -df_added_warehouses['CLOUD SERVICES CREDITS']
-            ).clip(upper=0)
-
-            select_columns_warehouse_credits = df_added_warehouses[["WAREHOUSE", "HOURS/YEAR", "COMPUTE CREDITS", "CREDIT/HOUR"]]
-            select_columns_warehouse_credits.rename({'HOURS/YEAR': 'ESTIMATED HOURS', 'COMPUTE CREDITS': 'CREDITS'}, axis=1,
-                                                    inplace=True
-                                                    )
-
-            df_warehouse_credits = select_columns_warehouse_credits[["WAREHOUSE", "ESTIMATED HOURS", "CREDIT/HOUR", "CREDITS"]] \
-                .astype({
-                "WAREHOUSE": str,
-                "ESTIMATED HOURS": int,
-                "CREDIT/HOUR": int,
-                "CREDITS": int
-            })
-
-            total_cloud_services_credits = df_added_warehouses['CLOUD SERVICES CREDITS'].sum()
-            total_cloud_services_credits_adjustments = df_added_warehouses['CSA'].sum()
-            total_estimate_credits = df_added_warehouses['COMPUTE CREDITS'].sum()
-
-            df_warehouse_credits_totals = pd.DataFrame(
-                [
-                    ["Cloud Services Credits :", "", "", total_cloud_services_credits],
-                    ["Cloud Services Adjustments :", "", "", total_cloud_services_credits_adjustments],
-                    ["Total Estimated Credits :", "", "", total_cloud_services_credits +
-                    total_cloud_services_credits_adjustments +
-                    total_estimate_credits]
+                "Value": [
+                    totals["compute_credits"],
+                    totals["cloud_services_credits"],
+                    totals["credit_unit_price"],
+                    totals["compute_usd"],
+                    totals["storage_usd_ondemand"],
+                    totals["storage_usd_capacity"],
+                    totals["total_usd_ondemand"],
+                    totals["total_usd_capacity"],
                 ],
-                columns=[
-                    "WAREHOUSE",
-                    "ESTIMATED HOURS",
-                    "CREDIT/HOUR",
-                    "CREDITS"
+            }
+        )
+        st.dataframe(breakdown, use_container_width=True, hide_index=True)
+
+# --- Comparison Tab ---
+with Tabs[2]:
+    st.subheader("Scenario Comparison")
+    if not st.session_state.scenarios:
+        st.info("Add at least one scenario to compare.")
+    else:
+        rows = []
+        for sc in st.session_state.scenarios.values():
+            totals = scenario_totals(sc, st.session_state.assumptions)
+            rows.append(
+                {
+                    "Scenario": sc.name,
+                    "Edition": sc.edition,
+                    "Provider": sc.provider,
+                    "Region": sc.region,
+                    "TB/mo": sc.tb_per_month,
+                    "Monthly On-Demand ($)": totals["monthly_usd_ondemand"],
+                    "Monthly Capacity ($)": totals["monthly_usd_capacity"],
+                    "Credits/yr": totals["credits_total"],
+                }
+            )
+        cmp_df = pd.DataFrame(rows)
+        st.dataframe(cmp_df, use_container_width=True, hide_index=True)
+
+# --- Assumptions Tab ---
+with Tabs[3]:
+    st.subheader("Assumptions")
+    a: Assumptions = st.session_state.assumptions
+
+    st.markdown("**Credit price by Edition** (read from credits.csv)")
+    st.dataframe(pd.DataFrame(list(a.credit_price_by_edition.items()), columns=["Edition", "$ / credit"]))
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        a.storage_price_per_tb = st.number_input("Storage price per TB ($)", 0.0, 1000.0, value=float(a.storage_price_per_tb))
+        a.cloud_services_pct_default = st.number_input("Cloud Services % (default)", 0.0, 100.0, value=float(a.cloud_services_pct_default))
+    with c2:
+        a.capacity_price_per_tb = st.number_input("Capacity price per TB ($)", 0.0, 1000.0, value=float(a.capacity_price_per_tb))
+        a.time_travel_storage_overhead_pct = st.number_input("Time Travel storage overhead %", 0.0, 100.0, value=float(a.time_travel_storage_overhead_pct))
+    with c3:
+        a.per_second_billing = st.checkbox("Per-second billing (min 60s)", value=a.per_second_billing)
+        a.fail_safe_storage_overhead_pct = st.number_input("Fail-safe storage overhead %", 0.0, 100.0, value=float(a.fail_safe_storage_overhead_pct))
+
+    st.session_state.assumptions = a
+
+# --- Templates Tab ---
+with Tabs[4]:
+    st.subheader("Workload Templates (adds to active scenario)")
+    if not st.session_state.active_scenario:
+        st.info("Select an active scenario in the sidebar first.")
+    else:
+        sc = st.session_state.scenarios[st.session_state.active_scenario]
+        t = st.selectbox("Choose template", ["(none)", "BI 9-5", "Nightly ELT", "Streaming 24/7", "Ad-hoc Analytics"])
+        size_opt = st.selectbox("Default size for template", options=valid_sizes, index=valid_sizes.index("M") if "M" in valid_sizes else 0)
+        if st.button("Apply Template") and t != "(none)":
+            presets: List[Warehouse] = []
+            if t == "BI 9-5":
+                presets = [
+                    Warehouse("WH_BI", size_opt, hours_per_day=8, days_per_week=5, min_clusters=1, max_clusters=2, cloud_services_pct=10),
                 ]
-            )
+            elif t == "Nightly ELT":
+                presets = [
+                    Warehouse("WH_ELT", size_opt, hours_per_day=3, days_per_week=7, min_clusters=1, max_clusters=1, cloud_services_pct=10),
+                ]
+            elif t == "Streaming 24/7":
+                presets = [
+                    Warehouse("WH_STREAM", size_opt, hours_per_day=24, days_per_week=7, min_clusters=2, max_clusters=4, cloud_services_pct=12),
+                ]
+            elif t == "Ad-hoc Analytics":
+                presets = [
+                    Warehouse("WH_ADHOC", size_opt, hours_per_day=4, days_per_week=3, min_clusters=1, max_clusters=1, cloud_services_pct=8),
+                ]
+            # merge/replace by name
+            names = {w.name for w in sc.warehouses}
+            for p in presets:
+                if p.name in names:
+                    sc.warehouses = [w for w in sc.warehouses if w.name != p.name] + [p]
+                else:
+                    sc.warehouses.append(p)
+            st.session_state.scenarios[sc.name] = sc
+            st.success(f"Template '{t}' applied to scenario '{sc.name}'.")
 
-            df_warehouse_credits.sort_values(by=['CREDIT/HOUR', 'CREDITS'], inplace=True)
+# --- Export Tab ---
+with Tabs[5]:
+    st.subheader("Export Results & Assumptions")
+    if not st.session_state.scenarios:
+        st.info("Add at least one scenario to export.")
+    else:
+        # Build a multi-sheet-like CSV (stacked with section markers) or provide per-scenario CSV
+        export_rows = []
+        for sc in st.session_state.scenarios.values():
+            totals = scenario_totals(sc, st.session_state.assumptions)
+            export_rows.append({"Section":"Scenario","Key":"Name","Value": sc.name})
+            export_rows.append({"Section":"Scenario","Key":"Edition","Value": sc.edition})
+            export_rows.append({"Section":"Scenario","Key":"Provider","Value": sc.provider})
+            export_rows.append({"Section":"Scenario","Key":"Region","Value": sc.region})
+            export_rows.append({"Section":"Scenario","Key":"TB/mo","Value": sc.tb_per_month})
+            export_rows.append({"Section":"Totals","Key":"Monthly On-Demand ($)","Value": totals['monthly_usd_ondemand']})
+            export_rows.append({"Section":"Totals","Key":"Monthly Capacity ($)","Value": totals['monthly_usd_capacity']})
+            export_rows.append({"Section":"Totals","Key":"Credits/yr","Value": totals['credits_total']})
+            for w in sc.warehouses:
+                export_rows.append({"Section":"Warehouse","Key": w.name, "Value": json.dumps(asdict(w))})
+        exp_df = pd.DataFrame(export_rows)
+        csv_buf = io.StringIO()
+        exp_df.to_csv(csv_buf, index=False)
+        st.download_button(
+            "Download CSV",
+            data=csv_buf.getvalue(),
+            file_name="snowflake_cost_estimates.csv",
+            mime="text/csv",
+        )
 
-            st.dataframe(pd.concat([df_warehouse_credits, df_warehouse_credits_totals]), hide_index=True)
+        # Export assumptions JSON
+        a_json = json.dumps(asdict(st.session_state.assumptions), indent=2)
+        st.download_button(
+            "Download Assumptions (JSON)",
+            data=a_json,
+            file_name="assumptions.json",
+            mime="application/json",
+        )
 
-    with st.expander("**Total**", expanded=True):
-        if st.session_state['warehouse_entries']:
-            item_credits = df_edition_credits[df_edition_credits['Edition'] == input_edition]['Credit']
-
-            data_df = pd.DataFrame(
-                dict(
-                    ITEM=[
-                        "Storage (" + str(storage) + " * $" + str("{:0,.2f}".format(float(STORAGE_PRICE_PER_TB))) + ")",
-                        "Proposed Credits (" + str(total_estimate_credits) + " * $" + str(
-                            "{:0,.2f}".format(float(item_credits))) + ")",
-                        "Product Capacity Total",
-                        "Capacity Total",
-                        "Total"
-                    ],
-                    SUBTOTAL=[
-                        int(storage_value),
-                        float(total_estimate_credits * item_credits),
-                        float(storage_value + (total_estimate_credits * item_credits)),
-                        float(storage_value + (total_estimate_credits * item_credits)),
-                        float(storage_value + (total_estimate_credits * item_credits))
-                    ])
-            )
-
-            st.dataframe(
-                data_df,
-                column_config={
-                    "ITEM": st.column_config.TextColumn(
-                        "ITEM",
-                        width="medium"
-                    ),
-                    "SUBTOTAL": st.column_config.NumberColumn(
-                        "SUBTOTAL",
-                        help="The price of the product in USD",
-                        width="medium",
-                        format="$%10.2f",
-                    )
-                },
-                hide_index=True,
-            )
-
-st.header('Pricing Estimate')
-st.write('For Planning purposes only. Actual pricing may vary.')
-url = "https://www.snowflake.com/pricing/pricing-guide/"
-st.write("**Snowflake Pricing Guide** [link](%s)" % url)
+# --- Glossary Tab ---
+with Tabs[6]:
+    st.subheader("Glossary (Quick References)")
+    st.markdown(
+        """
+        - **Credit**: Unit of compute billing; varies by warehouse size.
+        - **Cloud Services %**: Overhead for metadata, optimization, compilation, etc. Defaults around 10%.
+        - **Time Travel / Fail-safe**: Data retention features that can increase storage footprint.
+        - **Auto-suspend**: Auto-pauses a warehouse after inactivity; reduces billable time.
+        - **Min/Max Clusters**: For multi-cluster warehouses, bounds on concurrent clusters.
+        - **Concurrency Target**: Expected concurrent queries; used here to estimate average clusters.
+        """
+    )
